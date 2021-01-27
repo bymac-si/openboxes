@@ -9,6 +9,12 @@
  **/
 package org.pih.warehouse.product
 
+import org.pih.warehouse.core.ProductPrice
+import org.pih.warehouse.core.UnitOfMeasure
+
+import java.math.RoundingMode
+import java.text.SimpleDateFormat
+
 class ProductSupplierController {
 
     def dataService
@@ -89,6 +95,53 @@ class ProductSupplierController {
             if (!productSupplierInstance.code) {
                 String prefix = productSupplierInstance?.product?.productCode
                 productSupplierInstance.code = identifierService.generateProductSupplierIdentifier(prefix)
+            }
+
+            if (params.price) {
+                BigDecimal parsedUnitPrice
+                try {
+                    parsedUnitPrice = new BigDecimal(params.price).setScale(2, RoundingMode.FLOOR)
+                } catch (Exception e) {
+                    log.error("Unable to parse unit price: " + e.message, e)
+                    flash.message = "Could not parse unit price with value: ${params.price}."
+                    render(view: "edit", model: [productSupplierInstance: productSupplierInstance])
+                    return
+                }
+                if (parsedUnitPrice < 0) {
+                    log.error("Wrong unit price value: ${parsedUnitPrice}.")
+                    flash.message = "Wrong unit price value: ${parsedUnitPrice}."
+                    render(view: "edit", model: [productSupplierInstance: productSupplierInstance])
+                    return
+                }
+                def dateFormat = new SimpleDateFormat("MM/dd/yyyy")
+                if (productSupplierInstance.defaultProductPackage) {
+                    if (productSupplierInstance.defaultProductPackage.productPrice) {
+                        productSupplierInstance.defaultProductPackage.productPrice.price = parsedUnitPrice
+                        if (params.endDate) {
+                            productSupplierInstance.defaultProductPackage.productPrice.endDate = dateFormat.parse(params.endDate)
+                        }
+                    } else {
+                        ProductPrice productPrice = new ProductPrice()
+                        productPrice.price = parsedUnitPrice
+                        productPrice.endDate = params.endDate ? dateFormat.parse(params.endDate) : null
+                    }
+                } else {
+                    ProductPackage productPackage = new ProductPackage()
+                    productPackage.quantity = 1
+                    productPackage.product = productSupplierInstance.product
+                    productPackage.productSupplier = productSupplierInstance
+                    UnitOfMeasure unitOfMeasure = UnitOfMeasure.findByCode("1")
+                    if (unitOfMeasure) {
+                        productPackage.uom = unitOfMeasure
+                        productPackage.name = "${unitOfMeasure.code}/1"
+                        productPackage.description = "${unitOfMeasure.name} of 1"
+                    }
+                    ProductPrice productPrice = new ProductPrice()
+                    productPrice.price = parsedUnitPrice
+                    productPrice.endDate = params.endDate ? dateFormat.parse(params.endDate) : null
+                    productPackage.productPrice = productPrice
+                    productSupplierInstance.addToProductPackages(productPackage)
+                }
             }
 
             if (!productSupplierInstance.hasErrors() && productSupplierInstance.save(flush: true)) {
